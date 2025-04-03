@@ -1,0 +1,325 @@
+---
+title: "Choice-based Conjoint Analysis"
+output: html_document
+date: "2025-04-02"
+---
+  
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## 概要
+
+このRMarkdownは選択型コンジョイント分析（Choice-based Conjoint Analysis）を実行するためのコードを含んでいます。これは製品やサービスの特性（属性）に対する消費者の選好を分析するための手法です。
+
+## 環境設定
+
+まず必要なライブラリをロードし、作業ディレクトリを設定します。
+
+```{r libraries, message=FALSE, warning=FALSE}
+library(cbcTools)
+library(makedummies)
+library(mlogit)
+library(ggplot2)
+
+# 作業ディレクトリの設定
+working_dir <- '~/Github/math-seminar2-2025/'
+setwd(working_dir)
+```
+
+## パラメータ設定
+
+コンジョイント分析の実験デザインに必要なパラメータを設定します。属性テーブルは
+
+|price|taste|sugar|takeaway|
+|:--|:--|:--|:--|
+|100|mild|no|no|
+|150|bitter|yes|yes|
+
+のようにCSV形式で`attribute_table.csv`という名前のファイルに保存してください。
+各属性の水準数は異なっていてもかまいませんが、できる限り2水準あるいは3水準に揃えることをお勧めします。
+
+```{r parameters}
+# 乱数シードの設定
+set.seed(123)
+
+# デザイン方法: full, orthogonal, または dopt
+method <- "orthogonal"
+
+# 選択肢の数: 通常は2
+n_alts <- 2
+
+# 質問数
+# 2レベルモデルの場合、通常は8
+# 3レベルモデルの場合、通常は9
+# その他のケースでは、値を慎重に調整
+n_q <- 8
+#n_q <- 9
+
+# サンプルサイズ
+N <- 500
+
+# 属性テーブルのファイル名
+attr_tbl_file <- "attribute_table.csv"
+
+# シミュレーション用の係数
+# beta の長さは #レベル - #属性 と等しくなければならない
+# 例: 各2レベルの3属性の場合、2*3 - 3 = 3
+beta <- c(-1.2,0.5,0.8,-0.4)
+```
+
+## 属性テーブルの読み込み
+
+属性とレベルを定義したCSVファイルを読み込みます。
+
+```{r read_attribute_table}
+# 属性テーブルを読み込む
+attr_table <- read.csv(attr_tbl_file,
+                       header=TRUE,
+                       na.strings="",
+                       colClasses="character")
+
+# テーブルをリストに変換
+attribute_names <- names(attr_table)
+attrs <- as.list(attr_table)
+for (i in names(attrs)) {
+  attrs[[i]] <- attrs[[i]][!is.na(attrs[[i]])]
+}
+```
+
+## 実験計画
+
+属性とレベルに基づいてプロファイルを作成し、実験デザインを生成します。
+
+```{r experiment_design}
+# プロファイルの作成
+profiles <- do.call(cbc_profiles, attrs)
+
+write.csv(profiles, file='./profiles.csv', row.names=FALSE)
+
+# デザイン
+design <- cbc_design(profiles=profiles, 
+                     n_resp=1,
+                     n_alts=n_alts,
+                     n_q=n_q,
+                     n_blocks=1,
+                     no_choice=FALSE,
+                     method=method
+)
+
+write.csv(design, file='./design.csv', row.names=FALSE)
+```
+
+## デザインの診断
+
+作成したデザインのバランスと直交性を確認します。
+
+```{r design_diagnostics}
+# レベルのバランスと直交性
+cbc_balance(design)
+
+# 結果をファイルに保存
+sink("cbc_balance.txt")
+cbc_balance(design)
+sink()
+
+# 重要: 選択肢間のレベル重複
+cbc_overlap(design)
+
+# 結果をファイルに保存
+sink("cbc_overlap.txt")
+cbc_overlap(design)
+sink()
+```
+
+## ダミー変数への変換
+
+カテゴリカル変数をダミー変数に変換し、実際に使用されるプロファイルを特定します。
+
+```{r dummy_conversion}
+# カテゴリカル変数をダミー変数に変換
+profiles_dummy <- makedummies(profiles, as.is=c("profileID"))
+
+# 実際に使用されるプロファイル
+used_profileID <- sort(unique(design$profileID))
+
+# デザインで使用される直交表を表示
+used_profiles_dummy <- profiles_dummy[profiles_dummy$profileID %in% used_profileID,]
+write.csv(used_profiles_dummy, file='used_profiles_dummy.csv', row.names=FALSE)
+
+# デザインで使用されるプロファイルを表示
+used_profiles <- profiles[profiles$profileID %in% used_profileID,]
+write.csv(used_profiles, file='used_profiles.csv', row.names=FALSE)
+```
+
+## シミュレーション
+
+回答データをシミュレートする関数を定義し、テストデータを生成します。
+
+```{r simulation}
+# 関数 'cbc_simulation' はQualtrics形式のシミュレーションデータセットを返します
+
+cbc_simulation <- function(profiles_dummy, beta, output) {
+  
+  # プロファイルの効用
+  u <- as.matrix(profiles_dummy[,-1]) %*% beta
+  
+  # シミュレーション用のデザイン行列
+  design_forsim <- design
+  design_forsim$utility <- u[design$profileID]
+  design_forsim <- transform(design_forsim, exp_utility=exp(utility))
+  exp_utility_sum <- aggregate(design_forsim$exp_utility, by=list(design_forsim$qID), FUN=sum)
+  design_forsim$prob <- design_forsim$exp_utility / rep(exp_utility_sum$x, each=2)
+  prob_mat <- matrix(data=design_forsim$prob, byrow=TRUE, ncol=2)
+  
+  ### 回答者iの質問jに対する回答のシミュレーション
+  # シミュレートされた回答
+  simulated_responses <- matrix(nrow=n_q, ncol=N)  # (n_q) x (N) 行列
+  
+  for(i in 1:nrow(prob_mat)){
+    simulated_responses[i,] <- sample(1:n_alts, size=N, prob=prob_mat[i,], replace=TRUE)
+  }
+  write.csv(t(simulated_responses), file=output, row.names=FALSE)
+  return(t(simulated_responses))
+}
+
+# データをシミュレート
+simulated_data <- cbc_simulation(profiles_dummy, beta, "simulated_ql_data.csv")
+head(simulated_data)
+```
+
+## 統計分析
+
+シミュレートされたデータを読み込み、多項ロジットモデルを適用して分析します。
+
+```{r statistical_analysis}
+# 実際のデータがある場合は、シミュレートされたデータの代わりにそれを読み込みます
+
+responses <- t(read.csv('simulated_ql_data.csv', header=TRUE, row.names=NULL))
+
+# 分析用のデータフレーム
+mlogit_df <- data.frame(
+  respID = rep(1:N, each=n_alts*n_q),
+  qID = rep(rep(1:n_q, each=n_alts), N),
+  altID = rep(1:n_alts, n_q*N),
+  obsID = rep(1:(N*n_q), each=n_alts)
+)
+
+mlogit_df$profileID <- rep(design$profileID, N)
+
+for(att in names(attrs)) {
+  mlogit_df[,att] <- factor(rep(design[,att],N), levels=attrs[[att]])
+}
+
+# 回答データのフォーマット
+choice_data <- NULL
+for (resp in 1:N) {
+  for (q in 1:n_q) {
+    choice <- responses[q, resp]
+    choice_dummies <- rep(0, n_alts)
+    choice_dummies[choice] <- 1
+    choice_data <- c(choice_data, choice_dummies)
+  }
+}
+
+mlogit_df$response <- choice_data
+
+# データフレームが作成されました！
+
+# データフレームを 'dfidx' 形式に変換
+cbc.mlogit <- dfidx(data=mlogit_df, 
+                    choice="response",
+                    shape="long",
+                    idx=c("obsID","altID"),
+                    idnames=c("chid","alt"))
+
+# モデルを適合
+fml <- as.formula(paste("response ~ 0 + ", paste(names(attrs), collapse=" + ")))
+
+# contr.treatment の結果
+options(contrasts = c("contr.treatment","contr.poly"))
+cbc_treatment.ml <- mlogit(fml, data=cbc.mlogit)
+
+# contr.sum の結果
+options(contrasts = c("contr.sum","contr.poly"))
+cbc_sum.ml <- mlogit(fml, data=cbc.mlogit)
+
+# 推定係数を表示
+print(c(cbc_treatment.ml$coefficients))
+print(c(cbc_sum.ml$coefficients))
+```
+
+## 属性の重要度
+
+各属性の相対的な重要度を計算します。
+
+```{r attribute_importance}
+estimated_utils <- c(cbc_sum.ml$coefficients)
+eu_full <- NULL
+
+abs_importance <- vector(length=length(attrs))
+header <- 1
+for(i in 1:length(attrs)) {
+  # この属性のレベル数
+  no_levels <- length(attrs[[i]])
+  # この属性のレベルの推定効用
+  eu_this <- estimated_utils[header:(header+no_levels-2)]
+  # 最終レベルの効用を追加
+  eu_this_full <- c(eu_this, -sum(eu_this))
+  names(eu_this_full) <- attrs[[i]]
+  eu_full <- c(eu_full, eu_this_full)
+  abs_importance[i] <- max(eu_this_full) - min(eu_this_full)
+  header <- header + no_levels-1
+}
+importance <- abs_importance/sum(abs_importance)
+names(importance) <- names(attrs)
+```
+
+## グラフィカル分析
+
+分析結果をグラフで可視化します。
+
+```{r graphical_analysis}
+# 古典的な棒グラフ
+barplot(importance, main="属性の重要度")
+barplot(eu_full, main="レベルの効用値")
+
+# ggplotによる可視化 (オプション)
+# 重要度
+importance_df <- data.frame(
+  id = as.factor(1:length(importance)),
+  feature = names(importance),
+  value = as.numeric(importance)
+)
+
+ggplot(importance_df, aes(x = id, y = value)) +
+  geom_bar(stat = "identity") +
+  labs(
+    title = "属性の重要度",
+    x = "属性",
+    y = "重要度"
+  ) +
+  scale_x_discrete(labels=importance_df$feature)+
+  theme_bw()
+
+# 効用値
+eu_df <- data.frame(
+  id = as.factor(1:length(eu_full)),
+  level = names(eu_full),
+  value = as.numeric(eu_full)
+)
+
+ggplot(eu_df, aes(x = id, y = value)) +
+  geom_bar(stat = "identity") +
+  labs(
+    title = "推定効用値",
+    x = "レベル",
+    y = "効用値"
+  ) +
+  scale_x_discrete(labels=eu_df$level) +
+  theme_bw()
+```
+
+## 結論
+
+この分析により、各属性の相対的な重要度とレベルごとの効用値を推定することができました。これらの結果は、消費者の選好を理解し、製品やサービスの設計に役立てることができます。
