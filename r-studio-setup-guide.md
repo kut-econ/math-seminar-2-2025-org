@@ -98,7 +98,7 @@ install.packages("ggplot2")
 
 なおパッケージインストールの際に「どのサイトからインストールするか」を聞かれる場合がありますが、日本のサイトを選んでおけば通常間違いありません。
 
-## cbcToolsのgithubからのインストール
+### cbcToolsのgithubからのインストール
 
 cbcToolsはgithubからインストールできます。そのために、まず`remotes`パッケージをインストールしてください。
 
