@@ -71,21 +71,45 @@ Intel MacかApple Siliconか分からない場合はAppleメニューの「こ�
 
 ## 必要なRパッケージのインストール
 
-セミナーでは以下のパッケージを使用します。RStudioを起動し、以下のコマンドをコンソールに貼り付けて実行してください。
+セミナーでは以下のパッケージを使用します。
+
+- cbcTools
+- makedummies
+- mlogit
+- ggplot2
+
+このうち、`cbcTools`は現在CRANから削除されており、`install.packages`ではインストールできない状況となっています(2025/4/27現在)。したがって、それ以外のパッケージをまず`install.packages`でインストールしてください（下記参照）。
+
+RStudioを起動し、以下のコマンドをコンソールに貼り付けて実行してください。
 
 ```r
 # 必要なパッケージをインストール
-install.packages(c("cbcTools", "makedummies", "mlogit", "ggplot2"))
+install.packages(c("makedummies", "mlogit", "ggplot2"))
 ```
 
 ### 個別インストール方法（上記の一括インストールでエラーが出た場合）
 
 ```r
 # 個別にインストール
-install.packages("cbcTools")
 install.packages("makedummies")
 install.packages("mlogit")
 install.packages("ggplot2")
+```
+
+なおパッケージインストールの際に「どのサイトからインストールするか」を聞かれる場合がありますが、日本のサイトを選んでおけば通常間違いありません。
+
+## cbcToolsのgithubからのインストール
+
+cbcToolsはgithubからインストールできます。そのために、まず`remotes`パッケージをインストールしてください。
+
+```r
+install.packages("remotes")
+```
+
+次に、`remotes`パッケージを使って次のように`cbcTools`をgithubからインストールしてください。
+
+```r
+remotes::install_github("jhelvy/cbcTools")
 ```
 
 ## セットアップ確認方法
