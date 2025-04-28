@@ -10,7 +10,7 @@
 なお、RMarkdownバージョンはRスクリプト版からClaude3.7を用いて生成し、修正加筆したものです。HTML版はRMarkdown版をknitしたものです。
 
 - [Rスクリプト原本](./cbc_ja.R)
-- [Rマークダウンファイル](./cbc_ja2.Rmdtxt)
+- [Rマークダウンファイル](./cbc_ja2.Rmd)
 - [HTML版](./cbc_ja2.html)
 - [属性表（一例）](./attribute_table.csv)
 - [環境セットアップ手引(ビギナー向け)](./r-studio-setup-guide.md)
